@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: CodePipeline to execute CloudFormation CICD.
+
+Parameters:
+  CodeCommitArn:
+    Type: String
+
+Resources:
+
+  # -----------------------------------------------------------------
+  # IAM Role - CodePipeline service role
+  # -----------------------------------------------------------------
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: codepipeline-service-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline service role.
+
+  CodePipelineServiceRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: codepipeline-service-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAssumeRole
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: '*' # TODO: replace to arn of action roles
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+  # -----------------------------------------------------------------
+  # IAM Role - CodePipeline action role: Source
+  # -----------------------------------------------------------------
+  CodePipelineActionSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: codepipeline-action-source-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt  CodePipelineServiceRole.Arn
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - source.
+
+  CodePipelineActionSourceRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: codepipeline-action-source-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeCommitAccess
+            Effect: Allow
+            Action:
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+              - codecommit:CancelUploadArchive
+            Resource:
+              - !Ref CodeCommitArn
+      Roles:
+        - !Ref CodePipelineActionSourceRole
