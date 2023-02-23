@@ -9,12 +9,14 @@ Parameters:
 Resources:
 
   # -----------------------------------------------------------------
-  # IAM Role - CodePipeline service role
+  # CodePipeline
   # -----------------------------------------------------------------
+
+  ### IAM Role - CodePipeline service role
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: codepipeline-service-role
+      RoleName: cfn-pipeline-codepipeline-service-role
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -29,7 +31,7 @@ Resources:
   CodePipelineServiceRolePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: codepipeline-service-role-policy
+      PolicyName: cfn-pipeline-codepipeline-service-role-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -40,20 +42,18 @@ Resources:
       Roles:
         - !Ref CodePipelineServiceRole
 
-  # -----------------------------------------------------------------
-  # IAM Role - CodePipeline action role: Source
-  # -----------------------------------------------------------------
+  ### IAM Role - CodePipeline action role: Source
   CodePipelineActionSourceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: codepipeline-action-source-role
+      RoleName: cfn-pipeline-codepipeline-action-source-role
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               AWS:
-                - !GetAtt  CodePipelineServiceRole.Arn
+                - !GetAtt CodePipelineServiceRole.Arn
             Action:
               - sts:AssumeRole
       Description: IAM Role for CodePipeline action role - source.
@@ -61,7 +61,7 @@ Resources:
   CodePipelineActionSourceRolePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: codepipeline-action-source-role-policy
+      PolicyName: cfn-pipeline-codepipeline-action-source-role-policy
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -77,3 +77,51 @@ Resources:
               - !Ref CodeCommitArn
       Roles:
         - !Ref CodePipelineActionSourceRole
+
+  # -----------------------------------------------------------------
+  # Artifact store
+  # -----------------------------------------------------------------
+
+  ### S3
+  CodePipelineArtifactStore:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cfn-execution-pipeline-artifact-store-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref ArtifactStoreKey
+              SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ### KMS
+  ArtifactStoreKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/cfn-pipeline-artifact-store-key
+      TargetKeyId: !Ref ArtifactStoreKey
+
+  ArtifactStoreKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: For cfn pipeline artifact store
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeCommitAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: '*'
+            Resource: '*'
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
