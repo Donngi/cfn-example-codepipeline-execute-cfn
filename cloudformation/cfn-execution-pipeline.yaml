@@ -19,6 +19,9 @@ Parameters:
   BuildSpecCreateChangeSet:
     Type: String
 
+  BuildSpecDeploy:
+    Type: String
+
 Resources:
 
   # -----------------------------------------------------------------
@@ -177,7 +180,7 @@ Resources:
                 - codebuild.amazonaws.com
             Action:
               - sts:AssumeRole
-      Description: IAM Role for CodePipeline action role - source.
+      Description: IAM Role for CodePipeline action role - CI.
 
   CodeBuildActionCIRolePolicy:
     Type: AWS::IAM::Policy
@@ -221,7 +224,7 @@ Resources:
   CodeBuildActionCreateChangeSet:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: cfn-pipeline-create-chage-set-action
+      Name: cfn-pipeline-create-change-set-action
       Description: For cfn pipeline CreateChangeSet action.
       Artifacts:
         Type: CODEPIPELINE
@@ -242,7 +245,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: cfn-pipeline-codebuild-action-create-change-set-role
-      Description: IAM Role for CodePipeline action role - source.
+      Description: IAM Role for CodePipeline action role - CreateChangeSet.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -295,3 +298,46 @@ Resources:
               - '*'
       Roles:
         - !Ref CodeBuildActionCreateChangeSetRole
+
+  # -----------------------------------------------------------------
+  # CodeBuild - Deploy action
+  # -----------------------------------------------------------------
+
+  ### CodeBuild for Deploy action
+  CodeBuildActionDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: cfn-pipeline-deploy-action
+      Description: For cfn pipeline Deploy action.
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: CFN_CONFIG_FILE_PATH
+            Value: !Ref CfnConfigFilePath
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildActionDeployRole
+      Source:
+        BuildSpec: !Ref BuildSpecDeploy
+        Type: CODEPIPELINE
+
+  ### IAM Role for Deploy action
+  CodeBuildActionDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codebuild-action-deploy-role
+      Description: IAM Role for CodePipeline action role - Deploy.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+        - arn:aws:iam::aws:policy/IAMFullAccess
