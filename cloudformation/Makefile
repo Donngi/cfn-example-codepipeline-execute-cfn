@@ -1,7 +1,8 @@
 deploy-with-local:
 	rain deploy cfn-execution-pipeline.yaml \
 		-c config/local.yaml \
-		--params BuildSpecCi='$(shell cat buildspec/buildspec-ci.yml)' \
+		--params BuildSpecCi='$(shell cat buildspec/buildspec-ci.yml)'  \
+		--params BuildSpecCreateChangeSet='$(shell cat buildspec/buildspec-create-change-set.yml)' \
 		-y
 
 deploy-with-dev:

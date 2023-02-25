@@ -5,9 +5,18 @@ Description: CodePipeline to execute CloudFormation CICD.
 Parameters:
   CodeCommitArn:
     Type: String
+
   CfnConfigFilePath:
     Type: String
+
+  # NOTE: Pass your buildspec.yml like
+  # rain deploy cfn-execution-pipeline.yaml \
+  #             -c config/local.yaml \
+  #             --params BuildSpecCi=$(cat buildspec/buildspec-ci.yml)
   BuildSpecCi:
+    Type: String
+
+  BuildSpecCreateChangeSet:
     Type: String
 
 Resources:
@@ -44,7 +53,7 @@ Resources:
             Action: sts:AssumeRole
             Resource: '*' # TODO: replace to arn of action roles
       Roles:
-        - !Ref CodePipelineServiceRole  
+        - !Ref CodePipelineServiceRole
 
   ### IAM Role - CodePipeline action role: Source
   CodePipelineActionSourceRole:
@@ -112,6 +121,11 @@ Resources:
 
   ArtifactStoreKey:
     Type: AWS::KMS::Key
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
     Properties:
       Description: For cfn pipeline artifact store
       EnableKeyRotation: true
@@ -124,27 +138,22 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: '*'
             Resource: '*'
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - I3042
 
   # -----------------------------------------------------------------
   # CodeBuild - CI action
   # -----------------------------------------------------------------
 
-  ### CodeBuild
+  ### CodeBuild for CI action
   CodeBuildActionCI:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: cfn-pipeline-ci-action
-      Description: "For cfn pipeline CI action."
+      Description: For cfn pipeline CI action.
       Artifacts:
         Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        EnvironmentVariables: 
+        EnvironmentVariables:
           - Name: CFN_CONFIG_FILE_PATH
             Value: !Ref CfnConfigFilePath
         Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
@@ -154,7 +163,7 @@ Resources:
         BuildSpec: !Ref BuildSpecCi
         Type: CODEPIPELINE
 
-  ### IAM Role - CodePipeline action role: Source
+  ### IAM Role for CI action
   CodeBuildActionCIRole:
     Type: AWS::IAM::Role
     Properties:
@@ -184,13 +193,12 @@ Resources:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource:
-              - "*"
+              - '*'
           - Sid: AllowArtifactStoreAccess
             Effect: Allow
             Action:
-              - s3:PutObject
               - s3:GetObject
-            Resource: !Sub 
+            Resource: !Sub
               - ${S3Arn}/*
               - S3Arn: !GetAtt ArtifactStore.Arn
           - Sid: AllowKMSAccess
@@ -200,7 +208,90 @@ Resources:
               - kms:DescribeKey
               - kms:Encrypt
               - kms:ReEncrypt*
-              - kms:GenerateDatakey*             
+              - kms:GenerateDatakey*
             Resource: !GetAtt ArtifactStoreKey.Arn
       Roles:
         - !Ref CodeBuildActionCIRole
+
+  # -----------------------------------------------------------------
+  # CodeBuild - CreateChangeSet action
+  # -----------------------------------------------------------------
+
+  ### CodeBuild for CreateChangeSet action
+  CodeBuildActionCreateChangeSet:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: cfn-pipeline-create-chage-set-action
+      Description: For cfn pipeline CreateChangeSet action.
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: CFN_CONFIG_FILE_PATH
+            Value: !Ref CfnConfigFilePath
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildActionCreateChangeSetRole
+      Source:
+        BuildSpec: !Ref BuildSpecCreateChangeSet
+        Type: CODEPIPELINE
+
+  ### IAM Role for CreateChangeSet action
+  CodeBuildActionCreateChangeSetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codebuild-action-create-change-set-role
+      Description: IAM Role for CodePipeline action role - source.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  CodeBuildActionCreateChangeSetRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: cfn-pipeline-codebuild-action-create-change-set-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - '*'
+          - Sid: AllowArtifactStoreAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub
+              - ${S3Arn}/*
+              - S3Arn: !GetAtt ArtifactStore.Arn
+          - Sid: AllowKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDatakey*
+            Resource: !GetAtt ArtifactStoreKey.Arn
+          - Sid: AllowCloudFormationAccess
+            Effect: Allow
+            Action:
+              - cloudformation:ListStacks
+              - cloudformation:DescribeStacks
+              - cloudformation:CreateChangeSet
+              - cloudformation:DescribeChangeSet
+            Resource:
+              - '*'
+      Roles:
+        - !Ref CodeBuildActionCreateChangeSetRole
