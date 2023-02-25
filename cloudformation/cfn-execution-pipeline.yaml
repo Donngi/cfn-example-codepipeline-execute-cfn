@@ -5,6 +5,10 @@ Description: CodePipeline to execute CloudFormation CICD.
 Parameters:
   CodeCommitArn:
     Type: String
+  CfnConfigFilePath:
+    Type: String
+  BuildSpecCi:
+    Type: String
 
 Resources:
 
@@ -40,7 +44,7 @@ Resources:
             Action: sts:AssumeRole
             Resource: '*' # TODO: replace to arn of action roles
       Roles:
-        - !Ref CodePipelineServiceRole
+        - !Ref CodePipelineServiceRole  
 
   ### IAM Role - CodePipeline action role: Source
   CodePipelineActionSourceRole:
@@ -83,7 +87,7 @@ Resources:
   # -----------------------------------------------------------------
 
   ### S3
-  CodePipelineArtifactStore:
+  ArtifactStore:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub cfn-execution-pipeline-artifact-store-${AWS::AccountId}
@@ -125,3 +129,78 @@ Resources:
         config:
           ignore_checks:
             - I3042
+
+  # -----------------------------------------------------------------
+  # CodeBuild - CI action
+  # -----------------------------------------------------------------
+
+  ### CodeBuild
+  CodeBuildActionCI:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: cfn-pipeline-ci-action
+      Description: "For cfn pipeline CI action."
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables: 
+          - Name: CFN_CONFIG_FILE_PATH
+            Value: !Ref CfnConfigFilePath
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildActionCIRole
+      Source:
+        BuildSpec: !Ref BuildSpecCi
+        Type: CODEPIPELINE
+
+  ### IAM Role - CodePipeline action role: Source
+  CodeBuildActionCIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codebuild-action-ci-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - source.
+
+  CodeBuildActionCIRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: cfn-pipeline-codebuild-action-ci-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - "*"
+          - Sid: AllowArtifactStoreAccess
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub 
+              - ${S3Arn}/*
+              - S3Arn: !GetAtt ArtifactStore.Arn
+          - Sid: AllowKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDatakey*             
+            Resource: !GetAtt ArtifactStoreKey.Arn
+      Roles:
+        - !Ref CodeBuildActionCIRole

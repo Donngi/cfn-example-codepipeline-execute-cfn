@@ -1,6 +1,11 @@
 deploy-with-local:
-	rain deploy cfn-execution-pipeline.yaml -c config/local.yaml -y
+	rain deploy cfn-execution-pipeline.yaml \
+		-c config/local.yaml \
+		--params BuildSpecCi='$(shell cat buildspec/buildspec-ci.yml)' \
+		-y
 
 deploy-with-dev:
-	rain deploy cfn-execution-pipeline.yaml -c config/dev.yaml -y
-	
+	rain deploy cfn-execution-pipeline.yaml \
+		-c config/dev.yaml \
+		--params BuildSpecCi='$(shell cat buildspec/buildspec-ci.yml)' \
+		-y
