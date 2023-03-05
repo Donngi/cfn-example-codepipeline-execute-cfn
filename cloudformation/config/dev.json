@@ -1,6 +1,0 @@
-{
-    "Parameters": {
-        "CodeCommitArn": "YOUR_CODECOMMIT_ARN_HERE",
-        "CfnConfigFilePath": "YOUR_CONFIG_FILE_PATH_HERE"
-    }
-}

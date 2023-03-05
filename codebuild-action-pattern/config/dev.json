@@ -1,0 +1,8 @@
+{
+    "Parameters": {
+        "CodeCommitName": "YOUR_CODECOMMIT_NAME_HERE",
+        "CfnStackName": "YOUR_CFN_STACK_NAME_HERE",
+        "CfnTemplatePath": "YOUR_CFN_TEMPLATE_PATH_HERE",
+        "CfnConfigFilePath": "YOUR_CONFIG_FILE_PATH_HERE"
+    }
+}
