@@ -1,0 +1,485 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: CodePipeline to execute CloudFormation CICD.
+
+Parameters:
+  CodeCommitName:
+    Type: String
+
+  CfnStackName:
+    Type: String
+
+  CfnTemplatePath:
+    Type: String
+
+  CfnConfigFilePath:
+    Type: String    
+
+Resources:
+
+  # -----------------------------------------------------------------
+  # CodePipeline
+  # -----------------------------------------------------------------
+
+  # CodePipeline
+  CfnPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: cfn-execution-pipeline
+      ArtifactStore: 
+        Type: S3
+        Location: !Ref ArtifactStore
+        EncryptionKey: 
+          Type: KMS
+          Id: !GetAtt ArtifactStoreKey.KeyId
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              Namespace: source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: "1"
+              Configuration:
+                RepositoryName: !Ref CodeCommitName
+                BranchName: main
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: source-artifact
+              RoleArn: !GetAtt CodePipelineActionSourceRole.Arn
+        -  Name: CI
+           Actions:
+            - Name: CI
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CodeBuildActionCI
+              InputArtifacts:
+                - Name: source-artifact
+              RoleArn: !GetAtt CodePipelineActionCIRole.Arn
+        -  Name: CreateChangeSet
+           Actions:
+            - Name: CreateChangeSet
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                StackName: !Ref CfnStackName
+                Capabilities: CAPABILITY_NAMED_IAM
+                ActionMode: CHANGE_SET_REPLACE
+                ChangeSetName: commit-id-#{source.CommitId}
+                RoleArn: !GetAtt CloudFormationRole.Arn
+                TemplatePath: !Sub source-artifact::${CfnTemplatePath}
+                TemplateConfiguration: !Sub source-artifact::${CfnConfigFilePath}
+              InputArtifacts:
+                - Name: source-artifact
+              RoleArn: !GetAtt CodePipelineActionCreateChangeSetRole.Arn
+        -  Name: Approve
+           Actions:
+            - Name: Approve
+              ActionTypeId:
+                Owner: AWS
+                Category: Approval
+                Version: 1
+                Provider: Manual
+        -  Name: Deploy
+           Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: "1"
+              Configuration:
+                StackName: !Ref CfnStackName
+                Capabilities: CAPABILITY_NAMED_IAM
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: commit-id-#{source.CommitId}
+              RoleArn: !GetAtt CodePipelineActionDeployRole.Arn       
+
+  ### IAM Role - CodePipeline service role
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codepipeline-service-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline service role.
+
+  CodePipelineServiceRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codepipeline-service-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAssumeRole
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: 
+              - !GetAtt CodePipelineActionSourceRole.Arn
+              - !GetAtt CodePipelineActionCIRole.Arn
+              - !GetAtt CodePipelineActionCreateChangeSetRole.Arn
+              - !GetAtt CodePipelineActionDeployRole.Arn
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+  ### IAM Role - CodePipeline action role: Source
+  CodePipelineActionSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codepipeline-action-source-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - source.
+
+  CodePipelineActionSourceRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codepipeline-action-source-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeCommitAccess
+            Effect: Allow
+            Action:
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+              - codecommit:CancelUploadArchive
+            Resource:
+              - !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitName}"
+          - Sid: AllowArtifactStoreAccess
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub
+              - ${S3Arn}/*
+              - S3Arn: !GetAtt ArtifactStore.Arn
+          - Sid: AllowKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDatakey*
+            Resource: !GetAtt ArtifactStoreKey.Arn
+      Roles:
+        - !Ref CodePipelineActionSourceRole
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
+
+  ### IAM Role - CodePipeline action role: CI
+  CodePipelineActionCIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codepipeline-action-ci-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - CI.
+
+  CodePipelineActionCIRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codepipeline-action-ci-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeBuildAccess
+            Effect: Allow
+            Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+              - codebuild:StopBuild
+            Resource:
+              - !GetAtt CodeBuildActionCI.Arn
+      Roles:
+        - !Ref CodePipelineActionCIRole
+
+  ### IAM Role - CodePipeline action role: CreateChangeSet
+  CodePipelineActionCreateChangeSetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codepipeline-action-create-change-set-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - CreateChangeSet.
+
+  CodePipelineActionCreateChangeSetRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codepipeline-action-create-change-set-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFormationAccess
+            Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeChangeSet 
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+            Resource:
+              - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${CfnStackName}/*
+          - Sid: AllowArtifactStoreAccess
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub
+              - ${S3Arn}/*
+              - S3Arn: !GetAtt ArtifactStore.Arn
+          - Sid: AllowKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDatakey*
+            Resource: !GetAtt ArtifactStoreKey.Arn
+          - Sid: AllowPassRoleToCloudFormation
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt CloudFormationRole.Arn
+      Roles:
+        - !Ref CodePipelineActionCreateChangeSetRole
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
+
+  ### IAM Role - CodePipeline action role: Deploy
+  CodePipelineActionDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codepipeline-action-deploy-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - Deploy.
+
+  CodePipelineActionDeployRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codepipeline-action-deploy-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeBuildAccess
+            Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeChangeSet 
+              - cloudformation:ExecuteChangeSet
+            Resource:
+              - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${CfnStackName}/*
+      Roles:
+        - !Ref CodePipelineActionDeployRole
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
+            
+  # -----------------------------------------------------------------
+  # Artifact store
+  # -----------------------------------------------------------------
+
+  ### S3
+  ArtifactStore:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cfn-execution-pipeline-artifact-store-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref ArtifactStoreKey
+              SSEAlgorithm: aws:kms
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ### KMS
+  ArtifactStoreKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/cfn-pipeline-artifact-store-key
+      TargetKeyId: !Ref ArtifactStoreKey
+
+  ArtifactStoreKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: For cfn pipeline artifact store
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCodeCommitAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: '*'
+            Resource: '*'
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
+
+  # ----------------------------------------------------------------
+  # CodeBuild - CI action
+  # -----------------------------------------------------------------
+
+  ### CodeBuild for CI action
+  CodeBuildActionCI:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: cfn-pipeline-ci-action
+      Description: For cfn pipeline CI action.
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: CFN_TEMPLATE_PATH
+            Value: !Ref CfnTemplatePath
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildActionCIRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |-
+          version: 0.2
+
+          phases:
+            build:
+              commands:
+                - ls
+                
+
+  ### IAM Role for CI action
+  CodeBuildActionCIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-codebuild-action-ci-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Description: IAM Role for CodePipeline action role - CI.
+
+  CodeBuildActionCIRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: cfn-pipeline-codebuild-action-ci-role-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - '*'
+          - Sid: AllowArtifactStoreAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub
+              - ${S3Arn}/*
+              - S3Arn: !GetAtt ArtifactStore.Arn
+          - Sid: AllowKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDatakey*
+            Resource: !GetAtt ArtifactStoreKey.Arn
+      Roles:
+        - !Ref CodeBuildActionCIRole
+
+ # ----------------------------------------------------------------
+  # CloudFormation role
+  # -----------------------------------------------------------------
+
+  ### IAM role for CloudFormation
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cfn-pipeline-cloudformation-role
+      Description: IAM Role for CloudFormation.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+        - arn:aws:iam::aws:policy/IAMFullAccess
