@@ -13,7 +13,7 @@ Parameters:
     Type: String
 
   CfnConfigFilePath:
-    Type: String    
+    Type: String
 
 Resources:
 
@@ -26,10 +26,10 @@ Resources:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       Name: cfn-execution-pipeline
-      ArtifactStore: 
+      ArtifactStore:
         Type: S3
         Location: !Ref ArtifactStore
-        EncryptionKey: 
+        EncryptionKey:
           Type: KMS
           Id: !GetAtt ArtifactStoreKey.KeyId
       RoleArn: !GetAtt CodePipelineServiceRole.Arn
@@ -50,8 +50,8 @@ Resources:
               OutputArtifacts:
                 - Name: source-artifact
               RoleArn: !GetAtt CodePipelineActionSourceRole.Arn
-        -  Name: CI
-           Actions:
+        - Name: CI
+          Actions:
             - Name: CI
               ActionTypeId:
                 Category: Build
@@ -63,8 +63,8 @@ Resources:
               InputArtifacts:
                 - Name: source-artifact
               RoleArn: !GetAtt CodePipelineActionCIRole.Arn
-        -  Name: CreateChangeSet
-           Actions:
+        - Name: CreateChangeSet
+          Actions:
             - Name: CreateChangeSet
               ActionTypeId:
                 Category: Deploy
@@ -82,16 +82,16 @@ Resources:
               InputArtifacts:
                 - Name: source-artifact
               RoleArn: !GetAtt CodePipelineActionCreateChangeSetRole.Arn
-        -  Name: Approve
-           Actions:
+        - Name: Approve
+          Actions:
             - Name: Approve
               ActionTypeId:
                 Owner: AWS
                 Category: Approval
                 Version: 1
                 Provider: Manual
-        -  Name: Deploy
-           Actions:
+        - Name: Deploy
+          Actions:
             - Name: Deploy
               ActionTypeId:
                 Category: Deploy
@@ -103,7 +103,7 @@ Resources:
                 Capabilities: CAPABILITY_NAMED_IAM
                 ActionMode: CHANGE_SET_EXECUTE
                 ChangeSetName: commit-id-#{source.CommitId}
-              RoleArn: !GetAtt CodePipelineActionDeployRole.Arn       
+              RoleArn: !GetAtt CodePipelineActionDeployRole.Arn
 
   ### IAM Role - CodePipeline service role
   CodePipelineServiceRole:
@@ -131,7 +131,7 @@ Resources:
           - Sid: AllowAssumeRole
             Effect: Allow
             Action: sts:AssumeRole
-            Resource: 
+            Resource:
               - !GetAtt CodePipelineActionSourceRole.Arn
               - !GetAtt CodePipelineActionCIRole.Arn
               - !GetAtt CodePipelineActionCreateChangeSetRole.Arn
@@ -157,6 +157,11 @@ Resources:
 
   CodePipelineActionSourceRolePolicy:
     Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
     Properties:
       ManagedPolicyName: cfn-pipeline-codepipeline-action-source-role-policy
       PolicyDocument:
@@ -191,11 +196,6 @@ Resources:
             Resource: !GetAtt ArtifactStoreKey.Arn
       Roles:
         - !Ref CodePipelineActionSourceRole
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - I3042
 
   ### IAM Role - CodePipeline action role: CI
   CodePipelineActionCIRole:
@@ -249,6 +249,11 @@ Resources:
 
   CodePipelineActionCreateChangeSetRolePolicy:
     Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
     Properties:
       ManagedPolicyName: cfn-pipeline-codepipeline-action-create-change-set-role-policy
       PolicyDocument:
@@ -258,7 +263,7 @@ Resources:
             Effect: Allow
             Action:
               - cloudformation:DescribeStacks
-              - cloudformation:DescribeChangeSet 
+              - cloudformation:DescribeChangeSet
               - cloudformation:CreateChangeSet
               - cloudformation:DeleteChangeSet
             Resource:
@@ -287,11 +292,6 @@ Resources:
             Resource: !GetAtt CloudFormationRole.Arn
       Roles:
         - !Ref CodePipelineActionCreateChangeSetRole
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - I3042
 
   ### IAM Role - CodePipeline action role: Deploy
   CodePipelineActionDeployRole:
@@ -311,6 +311,11 @@ Resources:
 
   CodePipelineActionDeployRolePolicy:
     Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
     Properties:
       ManagedPolicyName: cfn-pipeline-codepipeline-action-deploy-role-policy
       PolicyDocument:
@@ -320,18 +325,13 @@ Resources:
             Effect: Allow
             Action:
               - cloudformation:DescribeStacks
-              - cloudformation:DescribeChangeSet 
+              - cloudformation:DescribeChangeSet
               - cloudformation:ExecuteChangeSet
             Resource:
               - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${CfnStackName}/*
       Roles:
         - !Ref CodePipelineActionDeployRole
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - I3042
-            
+
   # -----------------------------------------------------------------
   # Artifact store
   # -----------------------------------------------------------------
@@ -362,6 +362,11 @@ Resources:
 
   ArtifactStoreKey:
     Type: AWS::KMS::Key
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3042
     Properties:
       Description: For cfn pipeline artifact store
       EnableKeyRotation: true
@@ -374,11 +379,6 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: '*'
             Resource: '*'
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - I3042
 
   # ----------------------------------------------------------------
   # CodeBuild - CI action
@@ -402,14 +402,7 @@ Resources:
       ServiceRole: !Ref CodeBuildActionCIRole
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Sub |-
-          version: 0.2
-
-          phases:
-            build:
-              commands:
-                - ls
-                
+        BuildSpec: !Sub "version: 0.2\n\nphases:\n  build:\n    commands:\n      - ls\n      "
 
   ### IAM Role for CI action
   CodeBuildActionCIRole:
@@ -461,7 +454,7 @@ Resources:
       Roles:
         - !Ref CodeBuildActionCIRole
 
- # ----------------------------------------------------------------
+        # ----------------------------------------------------------------
   # CloudFormation role
   # -----------------------------------------------------------------
 
